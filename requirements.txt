@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+plotly
+openpyxl
+pyarrow
+duckdb
+python-dotenv
+sqlalchemy 
+psycopg2-binary

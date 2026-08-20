@@ -2202,240 +2202,134 @@ def create_filter_chip(
  
 # =========================================================
 
-# LOAD AND PREPARE DATA
+# LAZY, CACHED MART LOADING
 
 # =========================================================
- 
-@st.cache_data(
 
-    show_spinner="Loading dashboard data..."
+@st.cache_data(show_spinner=False, max_entries=12)
+def load_mart(file_path: str) -> pd.DataFrame:
+    """Load and standardize one parquet mart only when it is needed."""
 
-)
+    mart = pd.read_parquet(file_path)
+    mart = standardize_columns(mart)
+    mart = add_date_columns(mart)
 
-def load_data():
- 
-    sales = pd.read_parquet(
+    return mart
 
-        SALES_FILE
 
+@st.cache_data(show_spinner=False, max_entries=32)
+def load_filtered_mart(
+    file_path: str,
+    selected_years: tuple[str, ...],
+    selected_quarters: tuple[str, ...],
+    selected_months: tuple[str, ...],
+    selected_regions: tuple[str, ...],
+    selected_states: tuple[str, ...],
+    selected_hqs: tuple[str, ...],
+    selected_brands: tuple[str, ...],
+    selected_products: tuple[str, ...],
+) -> pd.DataFrame:
+    """Return a cached filtered slice without hashing a full dataframe."""
+
+    mart = load_mart(file_path)
+
+    return apply_filters(
+        mart,
+        list(selected_years),
+        list(selected_quarters),
+        list(selected_months),
+        list(selected_regions),
+        list(selected_states),
+        list(selected_hqs),
+        list(selected_brands),
+        list(selected_products),
     )
 
-    target = pd.read_parquet(
 
-        TARGET_FILE
+@st.cache_data(show_spinner=False, max_entries=24)
+def load_filtered_target_mart(
+    file_path: str,
+    selected_years: tuple[str, ...],
+    selected_quarters: tuple[str, ...],
+    selected_months: tuple[str, ...],
+    selected_regions: tuple[str, ...],
+    selected_states: tuple[str, ...],
+    selected_hqs: tuple[str, ...],
+    selected_brands: tuple[str, ...],
+) -> pd.DataFrame:
+    """Cached target slice; target mart has no product grain."""
 
+    mart = load_mart(file_path)
+
+    return apply_target_filters(
+        mart,
+        list(selected_years),
+        list(selected_quarters),
+        list(selected_months),
+        list(selected_regions),
+        list(selected_states),
+        list(selected_hqs),
+        list(selected_brands),
     )
 
-    mr = pd.read_parquet(
 
-        MR_FILE
+# Only the two marts needed to build the common sidebar are loaded at startup.
+# MR / doctor / visit / target marts are loaded inside their selected pages.
+sales_mart = load_mart(str(SALES_FILE))
+product_mart = load_mart(str(PRODUCT_FILE))
 
-    )
- 
-    doctor = pd.read_parquet(
-
-        DOCTOR_FILE
-
-    )
- 
-    visit = pd.read_parquet(
-
-        VISIT_FILE
-
-    )
- 
-    product = pd.read_parquet(
-
-        PRODUCT_FILE
-
-    )
- 
-    marts = {
-
-        "sales": sales,
-
-        "target": target,
-
-        "mr": mr,
-
-        "doctor": doctor,
-
-        "visit": visit,
-
-        "product": product,
-
-    }
- 
-    prepared_marts = {}
- 
-    for mart_name, mart in marts.items():
- 
-        mart = standardize_columns(
-
-            mart
-
-        )
- 
-        mart = add_date_columns(
-
-            mart
-
-        )
- 
-        prepared_marts[mart_name] = mart
- 
-    return (
-
-        prepared_marts["sales"],
-
-        prepared_marts["target"],
-
-        prepared_marts["mr"],
-
-        prepared_marts["doctor"],
-
-        prepared_marts["visit"],
-
-        prepared_marts["product"],
-
-    )
- 
- 
-(
-
-    sales_mart,
-
-    target_mart,
-
-    mr_mart,
-
-    doctor_mart,
-
-    visit_mart,
-
-    product_mart,
-
-) = load_data()
- 
- 
-# =========================================================
-
-# VALIDATE COLUMNS
 
 # =========================================================
- 
+# VALIDATE ONLY STARTUP MARTS
+# =========================================================
+
 common_dimension_columns = [
-
     MONTH_COLUMN,
-
     YEAR_COLUMN,
-
     QUARTER_COLUMN,
-
     MONTH_LABEL_COLUMN,
-
     REGION_COLUMN,
-
     STATE_COLUMN,
-
     HQ_COLUMN,
-
     BRAND_COLUMN,
-
     PRODUCT_COLUMN,
-
 ]
- 
-validate_columns(
 
+validate_columns(
     sales_mart,
-
     common_dimension_columns
-
     + [
-
         "GROSS_REVENUE",
-
         "RETURN_AMOUNT",
-
         "NET_REVENUE",
-
         "NET_QUANTITY",
-
         "TRACEABLE_REVENUE",
-
         "UNTRACED_REVENUE",
-
     ],
-
     "Sales mart",
-
 )
 
 validate_columns(
-    target_mart,
-    [
-        MONTH_COLUMN,
-        YEAR_COLUMN,
-        QUARTER_COLUMN,
-        MONTH_LABEL_COLUMN,
-        REGION_COLUMN,
-        STATE_COLUMN,
-        HQ_COLUMN,
-        BRAND_COLUMN,
-        "TARGET_SALES",
-        "TARGET_QUANTITY",
-    ],
-    "Target mart",
-)
- 
-validate_columns(
-
-    mr_mart,
-
-    common_dimension_columns
-
-    + [MR_COLUMN],
-
-    "MR mart",
-
-)
- 
-validate_columns(
-
-    doctor_mart,
-
-    common_dimension_columns
-
-    + [DOCTOR_COLUMN, "SPECIALISATION_KEY"],
-
-    "Doctor mart",
-
-)
- 
-validate_columns(
-
-    visit_mart,
-
-    common_dimension_columns
-
-    + [VISIT_COLUMN, "DOCTOR_KEY", "MR_KEY"],
-
-    "Visit mart",
-
-)
- 
-validate_columns(
-
     product_mart,
-
     common_dimension_columns,
-
     "Product mart",
-
 )
- 
- 
+
+
+def current_filter_tuples():
+    """Small hashable filter arguments for cached page-specific slices."""
+    return (
+        tuple(selected_years),
+        tuple(selected_quarter_keys),
+        tuple(selected_months),
+        tuple(selected_regions),
+        tuple(selected_states),
+        tuple(selected_hqs),
+        tuple(selected_brands),
+        tuple(selected_products),
+    )
+
+
 # =========================================================
 
 # DASHBOARD HEADER
@@ -3102,1067 +2996,9 @@ st.html(
  
  
 # =========================================================
-
-# APPLY FILTERS TO ALL MARTS
-
+# PAGE SELECTOR
+# Heavy marts and page dataframes are created only for the selected page.
 # =========================================================
- 
-filter_arguments = (
-
-    selected_years,
-
-    selected_quarter_keys,
-
-    selected_months,
-
-    selected_regions,
-
-    selected_states,
-
-    selected_hqs,
-
-    selected_brands,
-
-    selected_products,
-
-)
- 
-filtered_sales = apply_filters(
-
-    sales_mart,
-
-    *filter_arguments,
-
-)
-
-filtered_target = apply_target_filters(
-    target_mart,
-    selected_years,
-    selected_quarter_keys,
-    selected_months,
-    selected_regions,
-    selected_states,
-    selected_hqs,
-    selected_brands,
-)    
- 
-filtered_mr = apply_filters(
-
-    mr_mart,
-
-    *filter_arguments,
-
-)
- 
-filtered_doctor = apply_filters(
-
-    doctor_mart,
-
-    *filter_arguments,
-
-)
- 
-filtered_visit = apply_filters(
-
-    visit_mart,
-
-    *filter_arguments,
-
-)
- 
-filtered_product = apply_filters(
-
-    product_mart,
-
-    *filter_arguments,
-
-)
- 
- 
-# =========================================================
-
-# REVENUE KPI CALCULATIONS
-
-# =========================================================
- 
-gross_revenue = safe_sum(
-    filtered_sales,
-    "GROSS_REVENUE",
-)
- 
-return_amount = safe_sum(
-    filtered_sales,
-    "RETURN_AMOUNT",
-)
- 
-net_revenue = safe_sum(
-    filtered_sales,
-    "NET_REVENUE",
-)
- 
-traceable_revenue = safe_sum(
-    filtered_sales,
-    "TRACEABLE_REVENUE",
-)
- 
-untraced_revenue = safe_sum(
-    filtered_sales,
-    "UNTRACED_REVENUE",
-)
- 
-net_quantity = safe_sum(
-    filtered_sales,
-    "NET_QUANTITY",
-)
- 
-traceable_percentage = safe_percentage(
-
-    traceable_revenue,
-
-    net_revenue,
-
-)
- 
-untraced_percentage = safe_percentage(
-
-    untraced_revenue,
-
-    net_revenue,
-
-)
- 
-return_percentage = safe_percentage(
-
-    return_amount,
-
-    gross_revenue,
-
-)
- 
- 
-# =========================================================
-
-# FIELD FORCE KPI CALCULATIONS
-
-# =========================================================
- 
-active_mrs = (
-
-    filtered_mr[
-
-        MR_COLUMN
-
-    ].nunique()
-
-)
- 
-unique_doctors = (
-
-    filtered_doctor[
-
-        DOCTOR_COLUMN
-
-    ].nunique()
-
-)
- 
-total_visits = (
-
-    filtered_visit[
-
-        VISIT_COLUMN
-
-    ].nunique()
-
-)
- 
-brands_detailed = (
-    filtered_product.loc[
-        filtered_product[
-            BRAND_COLUMN
-        ]
-        .astype("string")
-        .str.strip()
-        .str.upper()
-        .ne("ASRA"),
-        BRAND_COLUMN,
-    ]
-    .dropna()
-    .nunique()
-)
- 
-products_detailed = (
-
-    filtered_product[
-
-        PRODUCT_COLUMN
-
-    ].nunique()
-
-)
- 
-visits_per_mr = (
-
-    total_visits / active_mrs
-
-    if active_mrs > 0
-
-    else 0
-
-)
- 
-doctors_per_mr = (
-
-    unique_doctors / active_mrs
-
-    if active_mrs > 0
-
-    else 0
-
-)
-
-
-# ============================================================
-
-# QOQ DELTA CALCULATIONS
-
-# ============================================================
-
-#
-
-# QoQ intentionally ignores:
-
-# Financial Year
-
-# Financial Quarter
-
-# Month
-
-#
-
-# This is required so:
-
-#
-
-# FY2026-27 Q1
-
-#       compares with
-
-# FY2025-26 Q4
-
-#
-
-# Region / State / HQ / Brand / Product
-
-# are still respected.
-
-# ============================================================
- 
- 
-qoq_sales = apply_filters(
-
-    sales_mart,
- 
-    selected_years=[],
-
-    selected_quarters=[],
-
-    selected_months=[],
- 
-    selected_regions=selected_regions,
-
-    selected_states=selected_states,
-
-    selected_hqs=selected_hqs,
-
-    selected_brands=selected_brands,
-
-    selected_products=selected_products,
-
-).copy()
- 
- 
-# ============================================================
-
-# AGGREGATE ALL REVENUE KPI VALUES BY FINANCIAL QUARTER
-
-# ============================================================
- 
-quarterly_sales = (
-
-    qoq_sales
-
-    .groupby(
-
-        QUARTER_COLUMN,
-
-        as_index=False,
-
-        observed=True,
-
-    )
-
-    .agg(
-
-        GROSS_REVENUE=(
-
-            "GROSS_REVENUE",
-
-            "sum",
-
-        ),
- 
-        RETURN_AMOUNT=(
-
-            "RETURN_AMOUNT",
-
-            "sum",
-
-        ),
- 
-        NET_REVENUE=(
-
-            "NET_REVENUE",
-
-            "sum",
-
-        ),
- 
-        NET_QUANTITY=(
-
-            "NET_QUANTITY",
-
-            "sum",
-
-        ),
- 
-        TRACEABLE_REVENUE=(
-
-            "TRACEABLE_REVENUE",
-
-            "sum",
-
-        ),
- 
-        UNTRACED_REVENUE=(
-
-            "UNTRACED_REVENUE",
-
-            "sum",
-
-        ),
-
-    )
-
-)
- 
- 
-# ============================================================
-
-# EXTRACT FINANCIAL YEAR AND QUARTER NUMBER
-
-# ============================================================
- 
-quarterly_sales[
-
-    "FY_START_YEAR"
-
-] = pd.to_numeric(
-
-    quarterly_sales[
-
-        QUARTER_COLUMN
-
-    ]
-
-    .astype("string")
-
-    .str.extract(
-
-        r"FY(\d{4})",
-
-        expand=False,
-
-    ),
-
-    errors="coerce",
-
-)
- 
- 
-quarterly_sales[
-
-    "QUARTER_NUMBER"
-
-] = pd.to_numeric(
-
-    quarterly_sales[
-
-        QUARTER_COLUMN
-
-    ]
-
-    .astype("string")
-
-    .str.extract(
-
-        r"Q([1-4])",
-
-        expand=False,
-
-    ),
-
-    errors="coerce",
-
-)
- 
- 
-# ============================================================
-
-# CREATE TRUE QUARTER ORDER
-
-#
-
-# FY2025-26 Q4
-
-# comes immediately before
-
-# FY2026-27 Q1
-
-# ============================================================
- 
-quarterly_sales[
-
-    "QUARTER_ORDER"
-
-] = (
-
-    quarterly_sales[
-
-        "FY_START_YEAR"
-
-    ]
-
-    * 4
-
-    +
-
-    quarterly_sales[
-
-        "QUARTER_NUMBER"
-
-    ]
-
-)
- 
- 
-quarterly_sales = (
-
-    quarterly_sales
-
-    .dropna(
-
-        subset=[
-
-            "FY_START_YEAR",
-
-            "QUARTER_NUMBER",
-
-        ]
-
-    )
-
-    .sort_values(
-
-        "QUARTER_ORDER",
-
-        ascending=True,
-
-    )
-
-    .reset_index(drop=True)
-
-)
- 
- 
-# ============================================================
-
-# DEFAULT DELTA VALUES
-
-# ============================================================
- 
-gross_qoq_growth = None
- 
-return_qoq_growth = None
- 
-qoq_growth = None
- 
-quantity_qoq_growth = None
- 
-traceable_qoq_growth = None
- 
-untraced_qoq_growth = None
- 
-traceable_percentage_delta = None
- 
-untraced_percentage_delta = None
- 
-return_percentage_delta = None
- 
- 
-current_quarter_sales = 0.0
- 
-previous_quarter_sales = 0.0
- 
- 
-current_quarter_label = (
-
-    "Current Quarter"
-
-)
- 
-previous_quarter_label = (
-
-    "Previous Quarter"
-
-)
- 
- 
-qoq_delta_text = (
-
-    "Previous quarter data not available"
-
-)
- 
- 
-# ============================================================
-
-# HELPER — QOQ GROWTH %
-
-# ============================================================
- 
-def calculate_qoq_growth(
-
-    current_value,
-
-    previous_value,
-
-):
- 
-    if (
-
-        previous_value is None
-
-        or pd.isna(previous_value)
-
-        or previous_value == 0
-
-    ):
-
-        return None
- 
-    return (
-
-        (
-
-            current_value
-
-            - previous_value
-
-        )
-
-        / abs(previous_value)
-
-        * 100
-
-    )
- 
- 
-# ============================================================
-
-# SHORT QUARTER LABEL
-
-#
-
-# FY2026-27 Q1 -> Q1 '27
-
-# FY2025-26 Q4 -> Q4 '26
-
-# ============================================================
- 
-def short_quarter_label(
-
-    quarter_label: str,
-
-) -> str:
- 
-    match = re.search(
-
-        r"FY(\d{4})-(\d{2}) Q([1-4])",
-
-        str(quarter_label),
-
-    )
- 
-    if not match:
-
-        return str(
-
-            quarter_label
-
-        )
- 
-    end_year = match.group(2)
- 
-    quarter = match.group(3)
- 
-    return (
-
-        f"Q{quarter} '{end_year}"
-
-    )
- 
- 
-# ============================================================
-
-# GET CURRENT AND PREVIOUS QUARTER
-
-# ============================================================
- 
-if len(quarterly_sales) >= 2:
- 
-    previous_quarter = (
-
-        quarterly_sales.iloc[-2]
-
-    )
- 
-    current_quarter = (
-
-        quarterly_sales.iloc[-1]
-
-    )
- 
- 
-    # --------------------------------------------------------
-
-    # SHORT QUARTER LABELS
-
-    # --------------------------------------------------------
- 
-    current_quarter_label = (
-
-        short_quarter_label(
-
-            current_quarter[
-
-                QUARTER_COLUMN
-
-            ]
-
-        )
-
-    )
- 
- 
-    previous_quarter_label = (
-
-        short_quarter_label(
-
-            previous_quarter[
-
-                QUARTER_COLUMN
-
-            ]
-
-        )
-
-    )
- 
- 
-    # ========================================================
-
-    # NET REVENUE
-
-    # ========================================================
- 
-    current_quarter_sales = (
-
-        current_quarter[
-
-            "NET_REVENUE"
-
-        ]
-
-    )
- 
-    previous_quarter_sales = (
-
-        previous_quarter[
-
-            "NET_REVENUE"
-
-        ]
-
-    )
- 
- 
-    qoq_growth = (
-
-        calculate_qoq_growth(
-
-            current_quarter_sales,
-
-            previous_quarter_sales,
-
-        )
-
-    )
- 
- 
-    # ========================================================
-
-    # GROSS REVENUE
-
-    # ========================================================
- 
-    gross_qoq_growth = (
-
-        calculate_qoq_growth(
-
-            current_quarter[
-
-                "GROSS_REVENUE"
-
-            ],
-
-            previous_quarter[
-
-                "GROSS_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    # ========================================================
-
-    # RETURN AMOUNT
-
-    # ========================================================
- 
-    return_qoq_growth = (
-
-        calculate_qoq_growth(
-
-            current_quarter[
-
-                "RETURN_AMOUNT"
-
-            ],
-
-            previous_quarter[
-
-                "RETURN_AMOUNT"
-
-            ],
-
-        )
-
-    )
- 
- 
-    # ========================================================
-
-    # NET QUANTITY
-
-    # ========================================================
- 
-    quantity_qoq_growth = (
-
-        calculate_qoq_growth(
-
-            current_quarter[
-
-                "NET_QUANTITY"
-
-            ],
-
-            previous_quarter[
-
-                "NET_QUANTITY"
-
-            ],
-
-        )
-
-    )
- 
- 
-    # ========================================================
-
-    # TRACEABLE REVENUE
-
-    # ========================================================
- 
-    traceable_qoq_growth = (
-
-        calculate_qoq_growth(
-
-            current_quarter[
-
-                "TRACEABLE_REVENUE"
-
-            ],
-
-            previous_quarter[
-
-                "TRACEABLE_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    # ========================================================
-
-    # UNTRACED REVENUE
-
-    # ========================================================
- 
-    untraced_qoq_growth = (
-
-        calculate_qoq_growth(
-
-            current_quarter[
-
-                "UNTRACED_REVENUE"
-
-            ],
-
-            previous_quarter[
-
-                "UNTRACED_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    # ========================================================
-
-    # TRACEABLE %
-
-    # Percentage-point change
-
-    # ========================================================
- 
-    current_traceable_percentage = (
-
-        safe_percentage(
-
-            current_quarter[
-
-                "TRACEABLE_REVENUE"
-
-            ],
-
-            current_quarter[
-
-                "NET_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    previous_traceable_percentage = (
-
-        safe_percentage(
-
-            previous_quarter[
-
-                "TRACEABLE_REVENUE"
-
-            ],
-
-            previous_quarter[
-
-                "NET_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    traceable_percentage_delta = (
-
-        current_traceable_percentage
-
-        - previous_traceable_percentage
-
-    )
- 
- 
-    # ========================================================
-
-    # UNTRACED %
-
-    # Percentage-point change
-
-    # ========================================================
- 
-    current_untraced_percentage = (
-
-        safe_percentage(
-
-            current_quarter[
-
-                "UNTRACED_REVENUE"
-
-            ],
-
-            current_quarter[
-
-                "NET_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    previous_untraced_percentage = (
-
-        safe_percentage(
-
-            previous_quarter[
-
-                "UNTRACED_REVENUE"
-
-            ],
-
-            previous_quarter[
-
-                "NET_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    untraced_percentage_delta = (
-
-        current_untraced_percentage
-
-        - previous_untraced_percentage
-
-    )
- 
- 
-    # ========================================================
-
-    # RETURN %
-
-    #
-
-    # Return Amount / Gross Revenue
-
-    # Percentage-point change
-
-    # ========================================================
- 
-    current_return_percentage = (
-
-        safe_percentage(
-
-            current_quarter[
-
-                "RETURN_AMOUNT"
-
-            ],
-
-            current_quarter[
-
-                "GROSS_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    previous_return_percentage = (
-
-        safe_percentage(
-
-            previous_quarter[
-
-                "RETURN_AMOUNT"
-
-            ],
-
-            previous_quarter[
-
-                "GROSS_REVENUE"
-
-            ],
-
-        )
-
-    )
- 
- 
-    return_percentage_delta = (
-
-        current_return_percentage
-
-        - previous_return_percentage
-
-    )
- 
- 
-    # ========================================================
-
-    # QOQ CONTEXT
-
-    #
-
-    # Q1 '27 ₹18.23 Cr vs Q4 '26 ₹13.17 Cr
-
-    # ========================================================
- 
-    qoq_delta_text = (
-
-        f"{current_quarter_label} "
-
-        f"₹{format_currency(current_quarter_sales)}"
-
-        f" vs "
-
-        f"{previous_quarter_label} "
-
-        f"₹{format_currency(previous_quarter_sales)}"
-
-    )
- 
- 
-
- 
 
 selected_view = st.radio(
 
@@ -4177,6 +3013,1018 @@ selected_view = st.radio(
  
  
 if selected_view == "Overview": 
+
+    # =========================================================
+    # OVERVIEW — LAZY PAGE DATA
+    # =========================================================
+    filter_args = current_filter_tuples()
+
+    filtered_sales = load_filtered_mart(
+        str(SALES_FILE), *filter_args
+    )
+    filtered_product = load_filtered_mart(
+        str(PRODUCT_FILE), *filter_args
+    )
+
+    # Field-force marts are needed on Overview, so load them only here.
+    mr_mart = load_mart(str(MR_FILE))
+    doctor_mart = load_mart(str(DOCTOR_FILE))
+    visit_mart = load_mart(str(VISIT_FILE))
+
+    validate_columns(mr_mart, common_dimension_columns + [MR_COLUMN], "MR mart")
+    validate_columns(doctor_mart, common_dimension_columns + [DOCTOR_COLUMN, "SPECIALISATION_KEY"], "Doctor mart")
+    validate_columns(visit_mart, common_dimension_columns + [VISIT_COLUMN, DOCTOR_COLUMN, MR_COLUMN], "Visit mart")
+
+    filtered_mr = load_filtered_mart(str(MR_FILE), *filter_args)
+    filtered_doctor = load_filtered_mart(str(DOCTOR_FILE), *filter_args)
+    filtered_visit = load_filtered_mart(str(VISIT_FILE), *filter_args)
+
+    # =========================================================
+
+    # REVENUE KPI CALCULATIONS
+
+    # =========================================================
+ 
+    gross_revenue = safe_sum(
+        filtered_sales,
+        "GROSS_REVENUE",
+    )
+ 
+    return_amount = safe_sum(
+        filtered_sales,
+        "RETURN_AMOUNT",
+    )
+ 
+    net_revenue = safe_sum(
+        filtered_sales,
+        "NET_REVENUE",
+    )
+ 
+    traceable_revenue = safe_sum(
+        filtered_sales,
+        "TRACEABLE_REVENUE",
+    )
+ 
+    untraced_revenue = safe_sum(
+        filtered_sales,
+        "UNTRACED_REVENUE",
+    )
+ 
+    net_quantity = safe_sum(
+        filtered_sales,
+        "NET_QUANTITY",
+    )
+ 
+    traceable_percentage = safe_percentage(
+
+        traceable_revenue,
+
+        net_revenue,
+
+    )
+ 
+    untraced_percentage = safe_percentage(
+
+        untraced_revenue,
+
+        net_revenue,
+
+    )
+ 
+    return_percentage = safe_percentage(
+
+        return_amount,
+
+        gross_revenue,
+
+    )
+ 
+ 
+    # =========================================================
+
+    # FIELD FORCE KPI CALCULATIONS
+
+    # =========================================================
+ 
+    active_mrs = (
+
+        filtered_mr[
+
+            MR_COLUMN
+
+        ].nunique()
+
+    )
+ 
+    unique_doctors = (
+
+        filtered_doctor[
+
+            DOCTOR_COLUMN
+
+        ].nunique()
+
+    )
+ 
+    total_visits = (
+
+        filtered_visit[
+
+            VISIT_COLUMN
+
+        ].nunique()
+
+    )
+ 
+    brands_detailed = (
+        filtered_product.loc[
+            filtered_product[
+                BRAND_COLUMN
+            ]
+            .astype("string")
+            .str.strip()
+            .str.upper()
+            .ne("ASRA"),
+            BRAND_COLUMN,
+        ]
+        .dropna()
+        .nunique()
+    )
+ 
+    products_detailed = (
+
+        filtered_product[
+
+            PRODUCT_COLUMN
+
+        ].nunique()
+
+    )
+ 
+    visits_per_mr = (
+
+        total_visits / active_mrs
+
+        if active_mrs > 0
+
+        else 0
+
+    )
+ 
+    doctors_per_mr = (
+
+        unique_doctors / active_mrs
+
+        if active_mrs > 0
+
+        else 0
+
+    )
+
+
+    # ============================================================
+
+    # QOQ DELTA CALCULATIONS
+
+    # ============================================================
+
+    #
+
+    # QoQ intentionally ignores:
+
+    # Financial Year
+
+    # Financial Quarter
+
+    # Month
+
+    #
+
+    # This is required so:
+
+    #
+
+    # FY2026-27 Q1
+
+    #       compares with
+
+    # FY2025-26 Q4
+
+    #
+
+    # Region / State / HQ / Brand / Product
+
+    # are still respected.
+
+    # ============================================================
+ 
+ 
+    qoq_sales = apply_filters(
+
+        sales_mart,
+ 
+        selected_years=[],
+
+        selected_quarters=[],
+
+        selected_months=[],
+ 
+        selected_regions=selected_regions,
+
+        selected_states=selected_states,
+
+        selected_hqs=selected_hqs,
+
+        selected_brands=selected_brands,
+
+        selected_products=selected_products,
+
+    ).copy()
+ 
+ 
+    # ============================================================
+
+    # AGGREGATE ALL REVENUE KPI VALUES BY FINANCIAL QUARTER
+
+    # ============================================================
+ 
+    quarterly_sales = (
+
+        qoq_sales
+
+        .groupby(
+
+            QUARTER_COLUMN,
+
+            as_index=False,
+
+            observed=True,
+
+        )
+
+        .agg(
+
+            GROSS_REVENUE=(
+
+                "GROSS_REVENUE",
+
+                "sum",
+
+            ),
+ 
+            RETURN_AMOUNT=(
+
+                "RETURN_AMOUNT",
+
+                "sum",
+
+            ),
+ 
+            NET_REVENUE=(
+
+                "NET_REVENUE",
+
+                "sum",
+
+            ),
+ 
+            NET_QUANTITY=(
+
+                "NET_QUANTITY",
+
+                "sum",
+
+            ),
+ 
+            TRACEABLE_REVENUE=(
+
+                "TRACEABLE_REVENUE",
+
+                "sum",
+
+            ),
+ 
+            UNTRACED_REVENUE=(
+
+                "UNTRACED_REVENUE",
+
+                "sum",
+
+            ),
+
+        )
+
+    )
+ 
+ 
+    # ============================================================
+
+    # EXTRACT FINANCIAL YEAR AND QUARTER NUMBER
+
+    # ============================================================
+ 
+    quarterly_sales[
+
+        "FY_START_YEAR"
+
+    ] = pd.to_numeric(
+
+        quarterly_sales[
+
+            QUARTER_COLUMN
+
+        ]
+
+        .astype("string")
+
+        .str.extract(
+
+            r"FY(\d{4})",
+
+            expand=False,
+
+        ),
+
+        errors="coerce",
+
+    )
+ 
+ 
+    quarterly_sales[
+
+        "QUARTER_NUMBER"
+
+    ] = pd.to_numeric(
+
+        quarterly_sales[
+
+            QUARTER_COLUMN
+
+        ]
+
+        .astype("string")
+
+        .str.extract(
+
+            r"Q([1-4])",
+
+            expand=False,
+
+        ),
+
+        errors="coerce",
+
+    )
+ 
+ 
+    # ============================================================
+
+    # CREATE TRUE QUARTER ORDER
+
+    #
+
+    # FY2025-26 Q4
+
+    # comes immediately before
+
+    # FY2026-27 Q1
+
+    # ============================================================
+ 
+    quarterly_sales[
+
+        "QUARTER_ORDER"
+
+    ] = (
+
+        quarterly_sales[
+
+            "FY_START_YEAR"
+
+        ]
+
+        * 4
+
+        +
+
+        quarterly_sales[
+
+            "QUARTER_NUMBER"
+
+        ]
+
+    )
+ 
+ 
+    quarterly_sales = (
+
+        quarterly_sales
+
+        .dropna(
+
+            subset=[
+
+                "FY_START_YEAR",
+
+                "QUARTER_NUMBER",
+
+            ]
+
+        )
+
+        .sort_values(
+
+            "QUARTER_ORDER",
+
+            ascending=True,
+
+        )
+
+        .reset_index(drop=True)
+
+    )
+ 
+ 
+    # ============================================================
+
+    # DEFAULT DELTA VALUES
+
+    # ============================================================
+ 
+    gross_qoq_growth = None
+ 
+    return_qoq_growth = None
+ 
+    qoq_growth = None
+ 
+    quantity_qoq_growth = None
+ 
+    traceable_qoq_growth = None
+ 
+    untraced_qoq_growth = None
+ 
+    traceable_percentage_delta = None
+ 
+    untraced_percentage_delta = None
+ 
+    return_percentage_delta = None
+ 
+ 
+    current_quarter_sales = 0.0
+ 
+    previous_quarter_sales = 0.0
+ 
+ 
+    current_quarter_label = (
+
+        "Current Quarter"
+
+    )
+ 
+    previous_quarter_label = (
+
+        "Previous Quarter"
+
+    )
+ 
+ 
+    qoq_delta_text = (
+
+        "Previous quarter data not available"
+
+    )
+ 
+ 
+    # ============================================================
+
+    # HELPER — QOQ GROWTH %
+
+    # ============================================================
+ 
+    def calculate_qoq_growth(
+
+        current_value,
+
+        previous_value,
+
+    ):
+ 
+        if (
+
+            previous_value is None
+
+            or pd.isna(previous_value)
+
+            or previous_value == 0
+
+        ):
+
+            return None
+ 
+        return (
+
+            (
+
+                current_value
+
+                - previous_value
+
+            )
+
+            / abs(previous_value)
+
+            * 100
+
+        )
+ 
+ 
+    # ============================================================
+
+    # SHORT QUARTER LABEL
+
+    #
+
+    # FY2026-27 Q1 -> Q1 '27
+
+    # FY2025-26 Q4 -> Q4 '26
+
+    # ============================================================
+ 
+    def short_quarter_label(
+
+        quarter_label: str,
+
+    ) -> str:
+ 
+        match = re.search(
+
+            r"FY(\d{4})-(\d{2}) Q([1-4])",
+
+            str(quarter_label),
+
+        )
+ 
+        if not match:
+
+            return str(
+
+                quarter_label
+
+            )
+ 
+        end_year = match.group(2)
+ 
+        quarter = match.group(3)
+ 
+        return (
+
+            f"Q{quarter} '{end_year}"
+
+        )
+ 
+ 
+    # ============================================================
+
+    # GET CURRENT AND PREVIOUS QUARTER
+
+    # ============================================================
+ 
+    if len(quarterly_sales) >= 2:
+ 
+        previous_quarter = (
+
+            quarterly_sales.iloc[-2]
+
+        )
+ 
+        current_quarter = (
+
+            quarterly_sales.iloc[-1]
+
+        )
+ 
+ 
+        # --------------------------------------------------------
+
+        # SHORT QUARTER LABELS
+
+        # --------------------------------------------------------
+ 
+        current_quarter_label = (
+
+            short_quarter_label(
+
+                current_quarter[
+
+                    QUARTER_COLUMN
+
+                ]
+
+            )
+
+        )
+ 
+ 
+        previous_quarter_label = (
+
+            short_quarter_label(
+
+                previous_quarter[
+
+                    QUARTER_COLUMN
+
+                ]
+
+            )
+
+        )
+ 
+ 
+        # ========================================================
+
+        # NET REVENUE
+
+        # ========================================================
+ 
+        current_quarter_sales = (
+
+            current_quarter[
+
+                "NET_REVENUE"
+
+            ]
+
+        )
+ 
+        previous_quarter_sales = (
+
+            previous_quarter[
+
+                "NET_REVENUE"
+
+            ]
+
+        )
+ 
+ 
+        qoq_growth = (
+
+            calculate_qoq_growth(
+
+                current_quarter_sales,
+
+                previous_quarter_sales,
+
+            )
+
+        )
+ 
+ 
+        # ========================================================
+
+        # GROSS REVENUE
+
+        # ========================================================
+ 
+        gross_qoq_growth = (
+
+            calculate_qoq_growth(
+
+                current_quarter[
+
+                    "GROSS_REVENUE"
+
+                ],
+
+                previous_quarter[
+
+                    "GROSS_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        # ========================================================
+
+        # RETURN AMOUNT
+
+        # ========================================================
+ 
+        return_qoq_growth = (
+
+            calculate_qoq_growth(
+
+                current_quarter[
+
+                    "RETURN_AMOUNT"
+
+                ],
+
+                previous_quarter[
+
+                    "RETURN_AMOUNT"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        # ========================================================
+
+        # NET QUANTITY
+
+        # ========================================================
+ 
+        quantity_qoq_growth = (
+
+            calculate_qoq_growth(
+
+                current_quarter[
+
+                    "NET_QUANTITY"
+
+                ],
+
+                previous_quarter[
+
+                    "NET_QUANTITY"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        # ========================================================
+
+        # TRACEABLE REVENUE
+
+        # ========================================================
+ 
+        traceable_qoq_growth = (
+
+            calculate_qoq_growth(
+
+                current_quarter[
+
+                    "TRACEABLE_REVENUE"
+
+                ],
+
+                previous_quarter[
+
+                    "TRACEABLE_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        # ========================================================
+
+        # UNTRACED REVENUE
+
+        # ========================================================
+ 
+        untraced_qoq_growth = (
+
+            calculate_qoq_growth(
+
+                current_quarter[
+
+                    "UNTRACED_REVENUE"
+
+                ],
+
+                previous_quarter[
+
+                    "UNTRACED_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        # ========================================================
+
+        # TRACEABLE %
+
+        # Percentage-point change
+
+        # ========================================================
+ 
+        current_traceable_percentage = (
+
+            safe_percentage(
+
+                current_quarter[
+
+                    "TRACEABLE_REVENUE"
+
+                ],
+
+                current_quarter[
+
+                    "NET_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        previous_traceable_percentage = (
+
+            safe_percentage(
+
+                previous_quarter[
+
+                    "TRACEABLE_REVENUE"
+
+                ],
+
+                previous_quarter[
+
+                    "NET_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        traceable_percentage_delta = (
+
+            current_traceable_percentage
+
+            - previous_traceable_percentage
+
+        )
+ 
+ 
+        # ========================================================
+
+        # UNTRACED %
+
+        # Percentage-point change
+
+        # ========================================================
+ 
+        current_untraced_percentage = (
+
+            safe_percentage(
+
+                current_quarter[
+
+                    "UNTRACED_REVENUE"
+
+                ],
+
+                current_quarter[
+
+                    "NET_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        previous_untraced_percentage = (
+
+            safe_percentage(
+
+                previous_quarter[
+
+                    "UNTRACED_REVENUE"
+
+                ],
+
+                previous_quarter[
+
+                    "NET_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        untraced_percentage_delta = (
+
+            current_untraced_percentage
+
+            - previous_untraced_percentage
+
+        )
+ 
+ 
+        # ========================================================
+
+        # RETURN %
+
+        #
+
+        # Return Amount / Gross Revenue
+
+        # Percentage-point change
+
+        # ========================================================
+ 
+        current_return_percentage = (
+
+            safe_percentage(
+
+                current_quarter[
+
+                    "RETURN_AMOUNT"
+
+                ],
+
+                current_quarter[
+
+                    "GROSS_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        previous_return_percentage = (
+
+            safe_percentage(
+
+                previous_quarter[
+
+                    "RETURN_AMOUNT"
+
+                ],
+
+                previous_quarter[
+
+                    "GROSS_REVENUE"
+
+                ],
+
+            )
+
+        )
+ 
+ 
+        return_percentage_delta = (
+
+            current_return_percentage
+
+            - previous_return_percentage
+
+        )
+ 
+ 
+        # ========================================================
+
+        # QOQ CONTEXT
+
+        #
+
+        # Q1 '27 ₹18.23 Cr vs Q4 '26 ₹13.17 Cr
+
+        # ========================================================
+ 
+        qoq_delta_text = (
+
+            f"{current_quarter_label} "
+
+            f"₹{format_currency(current_quarter_sales)}"
+
+            f" vs "
+
+            f"{previous_quarter_label} "
+
+            f"₹{format_currency(previous_quarter_sales)}"
+
+        )
+ 
+ 
+
+ 
+
+
 # =========================================================
 
 # REVENUE PERFORMANCE
@@ -5975,40 +5823,21 @@ if selected_view == "Overview":
 
         )
     
+        # Align the four HQ aggregates by index instead of performing
+        # three successive dataframe merges. This is cheaper and keeps
+        # each source at one row per HQ.
         hq_performance = (
-
-            hq_revenue
-
-            .merge(
-
-                hq_mrs,
-
-                on=HQ_COLUMN,
-
-                how="left",
-
+            pd.concat(
+                [
+                    hq_revenue.set_index(HQ_COLUMN),
+                    hq_mrs.set_index(HQ_COLUMN),
+                    hq_doctors.set_index(HQ_COLUMN),
+                    hq_visits.set_index(HQ_COLUMN),
+                ],
+                axis=1,
+                join="outer",
             )
-
-            .merge(
-
-                hq_doctors,
-
-                on=HQ_COLUMN,
-
-                how="left",
-
-            )
-
-            .merge(
-
-                hq_visits,
-
-                on=HQ_COLUMN,
-
-                how="left",
-
-            )
-
+            .reset_index()
         )
     
         count_columns = [
@@ -6869,6 +6698,28 @@ if selected_view == "Overview":
 ## Doctor Details
 
 elif selected_view == "Doctor Coverage":
+
+    # =========================================================
+    # DOCTOR COVERAGE — LAZY PAGE DATA
+    # =========================================================
+    filter_args = current_filter_tuples()
+
+    filtered_sales = load_filtered_mart(str(SALES_FILE), *filter_args)
+
+    # Load doctor/visit/MR marts only when Doctor Coverage is selected.
+    doctor_mart = load_mart(str(DOCTOR_FILE))
+    visit_mart = load_mart(str(VISIT_FILE))
+    mr_mart = load_mart(str(MR_FILE))
+
+    validate_columns(doctor_mart, common_dimension_columns + [DOCTOR_COLUMN, "SPECIALISATION_KEY"], "Doctor mart")
+    validate_columns(visit_mart, common_dimension_columns + [VISIT_COLUMN, DOCTOR_COLUMN, MR_COLUMN], "Visit mart")
+    validate_columns(mr_mart, common_dimension_columns + [MR_COLUMN], "MR mart")
+
+    filtered_doctor = load_filtered_mart(str(DOCTOR_FILE), *filter_args)
+    filtered_visit = load_filtered_mart(str(VISIT_FILE), *filter_args)
+    filtered_mr = load_filtered_mart(str(MR_FILE), *filter_args)
+
+
        
  
     st.html(
@@ -6971,7 +6822,7 @@ elif selected_view == "Doctor Coverage":
 
         label="Unique Doctors",
 
-        value=f"{format_indian_number(unique_doctors)}",
+        value=f"{format_indian_number(unique_doctors_coverage)}",
 
         help=(
 
@@ -6989,7 +6840,7 @@ elif selected_view == "Doctor Coverage":
 
         label="Total Visits",
 
-        value=f"{format_indian_number(total_visits)}",
+        value=f"{format_indian_number(total_visits_coverage)}",
 
         help=(
 
@@ -7007,7 +6858,7 @@ elif selected_view == "Doctor Coverage":
 
         label="Active MRs",
 
-        value=f"{format_indian_number(active_mrs)}",
+        value=f"{format_indian_number(active_mrs_coverage)}",
 
         help=(
 
@@ -7284,13 +7135,15 @@ elif selected_view == "Doctor Coverage":
     )
     
     
-    hq_specialisation_doctors = (
-        hq_specialisation_doctors
-        .merge(
-            hq_total_doctors,
-            on=HQ_COLUMN,
-            how="left",
-        )
+    # Use an HQ lookup map rather than a dataframe merge.
+    hq_total_doctor_map = (
+        hq_total_doctors
+        .set_index(HQ_COLUMN)["HQ_TOTAL_DOCTORS"]
+    )
+    hq_specialisation_doctors["HQ_TOTAL_DOCTORS"] = (
+        hq_specialisation_doctors[HQ_COLUMN]
+        .map(hq_total_doctor_map)
+        .fillna(0)
     )
     
     
@@ -7338,13 +7191,16 @@ elif selected_view == "Doctor Coverage":
     # Merge and allocate
     # ---------------------------------------------------------
     
-    hq_specialisation_sales = (
-        hq_specialisation_doctors
-        .merge(
-            hq_sales,
-            on=HQ_COLUMN,
-            how="left",
-        )
+    # Map HQ sales onto the doctor-share table instead of merging.
+    hq_sales_map = (
+        hq_sales
+        .set_index(HQ_COLUMN)["HQ_PRIMARY_SALES"]
+    )
+    hq_specialisation_sales = hq_specialisation_doctors.copy()
+    hq_specialisation_sales["HQ_PRIMARY_SALES"] = (
+        hq_specialisation_sales[HQ_COLUMN]
+        .map(hq_sales_map)
+        .fillna(0)
     )
     
     
@@ -7386,26 +7242,20 @@ elif selected_view == "Doctor Coverage":
     # 7. FINAL DATAFRAME
     # =========================================================
     
+    # All four tables are one row per specialisation. Aligning their
+    # indexes avoids three repeated outer merges.
     specialisation_performance = (
-        grade_pivot
-    
-        .merge(
-            specialisation_doctors,
-            on=SPECIALISATION_COLUMN,
-            how="outer",
+        pd.concat(
+            [
+                grade_pivot.set_index(SPECIALISATION_COLUMN),
+                specialisation_doctors.set_index(SPECIALISATION_COLUMN),
+                specialisation_visits.set_index(SPECIALISATION_COLUMN),
+                specialisation_sales.set_index(SPECIALISATION_COLUMN),
+            ],
+            axis=1,
+            join="outer",
         )
-    
-        .merge(
-            specialisation_visits,
-            on=SPECIALISATION_COLUMN,
-            how="outer",
-        )
-    
-        .merge(
-            specialisation_sales,
-            on=SPECIALISATION_COLUMN,
-            how="outer",
-        )
+        .reset_index()
     )
 
     # =========================================================
@@ -9191,6 +9041,36 @@ elif selected_view == "Doctor Coverage":
 ## Targets VS Acievement
 
 elif selected_view == "Targets vs Achievement":
+
+    # =========================================================
+    # TARGETS — LAZY PAGE DATA
+    # =========================================================
+    filter_args = current_filter_tuples()
+    filtered_sales = load_filtered_mart(str(SALES_FILE), *filter_args)
+
+    target_mart = load_mart(str(TARGET_FILE))
+    validate_columns(
+        target_mart,
+        [
+            MONTH_COLUMN, YEAR_COLUMN, QUARTER_COLUMN, MONTH_LABEL_COLUMN,
+            REGION_COLUMN, STATE_COLUMN, HQ_COLUMN, BRAND_COLUMN,
+            "TARGET_SALES", "TARGET_QUANTITY",
+        ],
+        "Target mart",
+    )
+
+    filtered_target = load_filtered_target_mart(
+        str(TARGET_FILE),
+        tuple(selected_years),
+        tuple(selected_quarter_keys),
+        tuple(selected_months),
+        tuple(selected_regions),
+        tuple(selected_states),
+        tuple(selected_hqs),
+        tuple(selected_brands),
+    )
+
+
     # =========================================================
 
     # DYNAMIC TARGET PERFORMANCE
@@ -11055,6 +10935,15 @@ elif selected_view == "Targets vs Achievement":
     
     
     if show_mr_scorecard:
+
+        # Load the MR and visit marts only after the user explicitly asks for the scorecard.
+        mr_mart = load_mart(str(MR_FILE))
+        visit_mart = load_mart(str(VISIT_FILE))
+        validate_columns(mr_mart, common_dimension_columns + [MR_COLUMN], "MR mart")
+        validate_columns(visit_mart, common_dimension_columns + [VISIT_COLUMN, DOCTOR_COLUMN, MR_COLUMN], "Visit mart")
+        filtered_mr = load_filtered_mart(str(MR_FILE), *filter_args)
+        filtered_visit = load_filtered_mart(str(VISIT_FILE), *filter_args)
+
     
         MR_NAME_COLUMN = "MR_NAME"
     
@@ -12015,6 +11904,15 @@ elif selected_view == "Targets vs Achievement":
                 )
 
 elif selected_view == "Forecasting":
+
+    # =========================================================
+    # FORECASTING — SALES-ONLY BY DEFAULT
+    # =========================================================
+    # No doctor, visit or MR marts are loaded on this page.
+    # Target mart is loaded once because the forecast section uses available targets.
+    target_mart = load_mart(str(TARGET_FILE))
+
+
     # =========================================================
 
     # FORECASTING - 3 MONTH WEIGHTED MOVING AVERAGE (WMA)

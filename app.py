@@ -2,12 +2,18 @@
 # OVERVIEW - DUCKDB DATA LAYER
 # ============================================================
 
+import streamlit as st
+import pandas as pd
 import duckdb
-import time
+from pathlib import Path
 
 
-# Create DuckDB connection
-duck_con = duckdb.connect()
+# paths
+PROCESSED_DIR = Path("data/processed")
+
+
+# parquet files
+VISIT_FILE = PROCESSED_DIR / "dcr_visit_mart.parquet"
 
 
 # Parquet paths

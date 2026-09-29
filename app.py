@@ -2,31 +2,22 @@
 # OVERVIEW - DUCKDB DATA LAYER
 # ============================================================
 
-import streamlit as st
-import pandas as pd
 import duckdb
 import time
 from pathlib import Path
 
 
-# paths
+# Create DuckDB connection
+duck_con = duckdb.connect()
+
+
+# ============================================================
+# PARQUET PATH
+# ============================================================
+
 PROCESSED_DIR = Path("data/processed")
 
-
-# parquet files
 VISIT_FILE = PROCESSED_DIR / "dcr_visit_mart.parquet"
-
-
-# Parquet paths
-VISIT_FILE = PROCESSED_DIR / "dcr_visit_mart.parquet"
-DOCTOR_FILE = PROCESSED_DIR / "dcr_doctor_mart.parquet"
-MR_FILE = PROCESSED_DIR / "dcr_mr_mart.parquet"
-
-
-# ============================================================
-# OVERVIEW FILTER INPUTS
-# (keep your existing filters above this section)
-# ============================================================
 
 
 # ============================================================
@@ -36,25 +27,23 @@ MR_FILE = PROCESSED_DIR / "dcr_mr_mart.parquet"
 start_time = time.time()
 
 
-dcr_kpi = duck_con.execute(f"""
+dcr_kpi = duck_con.execute(
+    f"""
+    SELECT
 
-SELECT
+        COUNT(*) AS total_visits,
 
-    COUNT(*) AS total_visits,
+        COUNT(DISTINCT DOCTOR_KEY) AS unique_doctors,
 
-    COUNT(DISTINCT DOCTOR_KEY) AS unique_doctors,
+        COUNT(DISTINCT MR_KEY) AS active_employees,
 
-    COUNT(DISTINCT MR_KEY) AS active_employees,
+        COUNT(DISTINCT HQ_KEY) AS unique_hqs,
 
-    COUNT(DISTINCT HQ_KEY) AS unique_hqs,
+        COUNT(DISTINCT PRODUCT_KEY) AS unique_products
 
-    COUNT(DISTINCT PRODUCT_KEY) AS unique_products
-
-
-FROM read_parquet('{VISIT_FILE}')
-
-
-""").df()
+    FROM read_parquet('{VISIT_FILE}')
+    """
+).df()
 
 
 query_time = time.time() - start_time
@@ -65,24 +54,34 @@ st.caption(
 )
 
 
-# Extract KPI values
+# ============================================================
+# KPI VALUES
+# ============================================================
 
-total_visits = int(dcr_kpi.loc[0, "total_visits"])
+total_visits = int(
+    dcr_kpi["total_visits"].iloc[0]
+)
 
-unique_doctors = int(dcr_kpi.loc[0, "unique_doctors"])
+unique_doctors = int(
+    dcr_kpi["unique_doctors"].iloc[0]
+)
 
-active_employees = int(dcr_kpi.loc[0, "active_employees"])
+active_employees = int(
+    dcr_kpi["active_employees"].iloc[0]
+)
 
-unique_hqs = int(dcr_kpi.loc[0, "unique_hqs"])
+unique_hqs = int(
+    dcr_kpi["unique_hqs"].iloc[0]
+)
 
-unique_products = int(dcr_kpi.loc[0, "unique_products"])
-
+unique_products = int(
+    dcr_kpi["unique_products"].iloc[0]
+)
 
 
 # ============================================================
 # KPI CARDS
 # ============================================================
-
 
 kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 
@@ -90,33 +89,33 @@ kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 with kpi1:
     st.metric(
         "Total Visits",
-        format_indian_number(total_visits)
+        f"{total_visits:,}"
     )
 
 
 with kpi2:
     st.metric(
         "Unique Doctors",
-        format_indian_number(unique_doctors)
+        f"{unique_doctors:,}"
     )
 
 
 with kpi3:
     st.metric(
         "Active Employees",
-        format_indian_number(active_employees)
+        f"{active_employees:,}"
     )
 
 
 with kpi4:
     st.metric(
         "Unique HQs",
-        format_indian_number(unique_hqs)
+        f"{unique_hqs:,}"
     )
 
 
 with kpi5:
     st.metric(
         "Products Detailed",
-        format_indian_number(unique_products)
+        f"{unique_products:,}"
     )
